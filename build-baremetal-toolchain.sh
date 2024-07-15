@@ -518,12 +518,15 @@ cflags_for_target_common="-ffunction-sections -fdata-sections"
 if [ $flag_debug_target_flag -eq 0 ]; then
   cflags_for_target="$cflags_for_target_common -O2 -g"
   cflags_for_nano_target="$cflags_for_target_common -Os -g"
+  cflags_for_nano_eh_target="$cflags_for_target_common -Os -g"
 else
   cflags_for_target="$cflags_for_target_common -O0 -g3"
   cflags_for_nano_target="$cflags_for_target"
+  cflags_for_nano_eh_target="$cflags_for_target"
 fi
 cxxflags_for_target="$cflags_for_target"
 cxxflags_for_nano_target="$cflags_for_nano_target -fno-exceptions"
+cxxflags_for_nano_eh_target="$cflags_for_nano_target"
 
 if [ $release_flag -eq 0 ]; then
   if [ $flag_debug_options_flag -eq 0 ]; then
@@ -615,6 +618,7 @@ arm*-*-eabi | arm*-eabi)
   # function references.
   if [ $flag_enable_newlib_nano -eq 1 ]; then
     ldflags_for_nano_target="${ldflags_for_nano_target:- -specs aprofile-validation.specs -Wl,-u,_printf_float,-u,_scanf_float}"
+    ldflags_for_nano_eh_target="${ldflags_for_nano_eh_target:- -specs aprofile-validation.specs -Wl,-u,_printf_float,-u,_scanf_float}"
   fi
   ;;
 *)
@@ -749,14 +753,14 @@ while true; do
 
   start-bootstrap-newlib)
     mk_bin_dirs $prefix
-    push_stages gmp mpfr mpc isl cloog iconv binutils gdb gcc1 newlib newlib-nano gcc2 gcc2-nano
+    push_stages gmp mpfr mpc isl cloog iconv binutils gdb gcc1 newlib newlib-nano newlib-nano_eh gcc2 gcc2-nano gcc2-nano_eh
     ;;
 
   start)
     mk_bin_dirs $prefix
     write_build_status > build.status
 
-    push_stages gmp mpfr mpc isl cloog qemu iconv binutils gdb gcc1 newlib newlib-nano gcc2 gcc2-nano perms
+    push_stages gmp mpfr mpc isl cloog qemu iconv binutils gdb gcc1 newlib newlib-nano newlib-nano_eh gcc2 gcc2-nano gcc2-nano_eh perms
     ;;
 
   gmp)
@@ -1075,6 +1079,50 @@ while true; do
 	cp -f "${src_dir}/libg.a" "${dst_dir}/libg_nano.a"
 	cp -f "${src_dir}/librdimon.a" "${dst_dir}/librdimon_nano.a"
 	cp -f "${src_dir}/nano.specs" "${dst_dir}/"
+	cp -f "${src_dir}/nano_eh.specs" "${dst_dir}/"
+	cp -f "${src_dir}/rdimon.specs" "${dst_dir}/"
+	cp -f "${src_dir}/nosys.specs" "${dst_dir}/"
+	# Here it is safe to replace non-nano *crt0.o with the nano version because
+	# the the only difference in startup is that atexit is made a weak reference
+	#  in nano. With lite exit libs, a program not explicitly calling atexit or on_exit
+	# will escape from the burden of cleaning up code. A program with atexit
+	# or on_exit will work consistently to normal libs.
+	cp -f "${src_dir}/"*crt0.o "${dst_dir}/"
+      done
+    fi
+    ;;
+
+  newlib-nano_eh)
+    if [ $flag_enable_newlib_nano -eq 1 ]; then
+
+      gccbin="$objdir/gcc1/gcc"
+      newlib_nano_eh_objdir="$objdir/newlib-nano_eh"
+      newlib_nano_eh_srcdir="$newlib_src"
+      newlib_nano_eh_destdir=$nano_installdir
+      newlib_nano_eh_config="${newlib_nano_config_flags:-} \
+                       --target=$target \
+                       --prefix=$nano_prefix \
+		        ${bugurl:+--with-bugurl="\"$bugurl\""}"
+      newlib_nano_eh_cflags="$cflags"
+      newlib_nano_eh_cflags_for_target="${cflags_for_nano_eh_target:-}"
+      newlib_nano_eh_cxxflags_for_target="${cxxflags_for_nano_eh_target:-}"
+      newlib_nano_eh_ldflags_for_target="${ldflags_for_nano_eh_target:-}"
+      newlib_nano_eh_extra_config_envflags="CC_FOR_TARGET=\"$gccbin/xgcc -B$gccbin/\""
+      newlib_nano_eh_build_targets="all-target-newlib all-target-libgloss"
+      newlib_nano_eh_install_targets="install-target-newlib install-target-libgloss"
+      do_config_build_install newlib_nano_eh
+      mkdir -p $installdir/$prefix/$target/include/newlib-nano_eh
+      cp -f $nano_installdir/$nano_prefix/$target/include/newlib.h $installdir/$prefix/$target/include/newlib-nano
+      target_gcc="$gccbin/xgcc -B$gccbin/"
+      for multilib in $($target_gcc -print-multi-lib); do
+	multi_dir="${multilib%%;*}"
+	src_dir="$nano_installdir/$nano_prefix/$target/lib/$multi_dir"
+	dst_dir="$installdir/$prefix/$target/lib/$multi_dir"
+	cp -f "${src_dir}/libc.a" "${dst_dir}/libc_nano_eh.a"
+	cp -f "${src_dir}/libg.a" "${dst_dir}/libg_nano_eh.a"
+	cp -f "${src_dir}/librdimon.a" "${dst_dir}/librdimon_nano_eh.a"
+	cp -f "${src_dir}/nano.specs" "${dst_dir}/"
+	cp -f "${src_dir}/nano_eh.specs" "${dst_dir}/"
 	cp -f "${src_dir}/rdimon.specs" "${dst_dir}/"
 	cp -f "${src_dir}/nosys.specs" "${dst_dir}/"
 	# Here it is safe to replace non-nano *crt0.o with the nano version because
@@ -1157,6 +1205,7 @@ while true; do
                                ${hostmpc:+--with-mpc=$hostmpc} \
                                ${hostcloog:+--with-cloog=$hostcloog} \
                                ${hostisl:+--with-isl=$hostisl}\
+                               --disable-libstdcxx-verbose \
                                --disable-shared \
                                --disable-nls \
                                --disable-threads \
@@ -1194,6 +1243,60 @@ while true; do
 	  dst_dir="$installdir/$prefix/$target/lib/$multi_dir"
 	  cp -f "${src_dir}/libstdc++.a" "${dst_dir}/libstdc++_nano.a"
 	  cp -f "${src_dir}/libsupc++.a" "${dst_dir}/libsupc++_nano.a"
+	done
+      fi
+    fi
+    ;;
+
+  gcc2-nano_eh)
+    if [ $flag_enable_mingw -eq 0 ]; then
+      if [ $flag_enable_newlib_nano -eq 1 ]; then
+	# See comments above in gcc2 as to why we give absolute path to $prefix.
+	gcc2_nano_eh_config="--target=$target \
+                               --prefix=$nano_installdir/$nano_prefix \
+                               ${hostgmp:+--with-gmp=$hostgmp} \
+                               ${hostmpfr:+--with-mpfr=$hostmpfr} \
+                               ${hostmpc:+--with-mpc=$hostmpc} \
+                               ${hostcloog:+--with-cloog=$hostcloog} \
+                               ${hostisl:+--with-isl=$hostisl}\
+                               --disable-libstdcxx-verbose \
+                               --disable-shared \
+                               --disable-nls \
+                               --disable-threads \
+                               --disable-tls \
+                               --enable-checking=$flag_check_final \
+                               --enable-languages=$languages \
+                               --with-newlib \
+                               --with-gnu-as \
+                               --with-gnu-ld \
+                               --with-sysroot=$nano_installdir/$nano_prefix/$target \
+                               ${bugurl:+--with-bugurl="\"$bugurl\""} \
+                               $libstdcxx_flags \
+                               ${extra_config_flags_gcc:-}"
+	gcc2_nano_eh_srcdir="$gcc_src"
+	gcc2_nano_eh_objdir="$objdir/gcc2-nano_eh"
+	gcc2_nano_eh_cxxflags="$cflags"
+	gcc2_nano_eh_cflags="$cflags"
+	gcc2_nano_eh_cflags_for_target="${cflags_for_nano_eh_target:-}"
+	gcc2_nano_eh_cxxflags_for_target="${cxxflags_for_nano_eh_target:-}"
+	gcc2_nano_eh_ldflags_for_target="${ldflags_for_nano_eh_target:-}"
+	gcc2_nano_eh_extra_make_envflags="LDFLAGS_FOR_TARGET=${ldflags_for_nano_eh_target:-}"
+	gcc2_nano_eh_install_targets="install-gcc install-target-libgcc install-html-gcc install-target-libstdc++-v3 install-html-target-libstdc++-v3 install-target-libgfortran"
+	do_config gcc2_nano_eh
+	gcc2_nano_eh_build_targets="all-gcc all-target-libgcc"
+	do_make gcc2_nano_eh
+	gcc2_nano_eh_build_targets="all-target-libstdc++-v3 all-target-libquadmath all-target-libgfortran html-gcc html-target-libstdc++-v3"
+	do_make gcc2_nano_eh
+	do_install gcc2_nano_eh
+
+	gccbin="$objdir/gcc2-nano_eh/gcc"
+	target_gcc="$gccbin/xgcc -B$gccbin/"
+	for multilib in $($target_gcc -print-multi-lib); do
+	  multi_dir="${multilib%%;*}"
+	  src_dir="$nano_installdir/$nano_prefix/$target/lib/$multi_dir"
+	  dst_dir="$installdir/$prefix/$target/lib/$multi_dir"
+	  cp -f "${src_dir}/libstdc++.a" "${dst_dir}/libstdc++_nano_eh.a"
+	  cp -f "${src_dir}/libsupc++.a" "${dst_dir}/libsupc++_nano_eh.a"
 	done
       fi
     fi
