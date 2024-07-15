@@ -1157,6 +1157,7 @@ while true; do
                                ${hostmpc:+--with-mpc=$hostmpc} \
                                ${hostcloog:+--with-cloog=$hostcloog} \
                                ${hostisl:+--with-isl=$hostisl}\
+                               --disable-libstdcxx-verbose \
                                --disable-shared \
                                --disable-nls \
                                --disable-threads \
